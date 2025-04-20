@@ -6,6 +6,7 @@ from io import BytesIO
 import google.generativeai as genai
 import pandas as pd
 import json
+import re
 
 # --- Supabase Config ---
 SUPABASE_URL = "https://qorkvjajwksrckvomjqj.supabase.co"
@@ -48,8 +49,6 @@ def fetch_all_table_data():
         return None
 
 # --- Update refund request with amount ---
-# --- Update or create refund request with amount ---
-# --- Update refund request amount ---
 def update_refund_request_amount(image_url, amount):
     try:
         # Extract ID from filename (handling cases like 'refund_req1?.png')
@@ -77,8 +76,101 @@ def update_refund_request_amount(image_url, amount):
         st.error(f"Error processing receipt: {str(e)}")
         st.error(f"Debug info - File name: {file_name}, Clean name: {clean_name}")
         return False
+
+# --- Insert new employee record ---
+def insert_employee_record(name, salary):
+    try:
+        # Insert new record without specifying ID
+        insert_response = supabase.from_("employees").insert({
+            "name": name,
+            "salary": float(salary)
+        }).execute()
+        
+        if len(insert_response.data) > 0:
+            st.success(f"✅ Successfully added new employee: {name} with salary ${salary}")
+            return True
+        else:
+            st.error("❌ Failed to insert new employee record")
+            return False
+    except Exception as e:
+        st.error(f"Error inserting employee record: {str(e)}")
+        return False
+
+def update_employee_age(employee_id, age):
+    try:
+        update_response = supabase.from_("employees").update(
+            {"age": int(age)}
+        ).eq("id", int(employee_id)).execute()
+        
+        if len(update_response.data) > 0:
+            st.success(f"✅ Updated age to {age} for Employee ID {employee_id}")
+            return True
+        else:
+            st.error(f"❌ No employee found with ID {employee_id}")
+            return False
+    except Exception as e:
+        st.error(f"Error updating employee age: {str(e)}")
+        return False
+
+def is_age_update_request(user_prompt):
+    # Pattern for "insert the age of id 5, 45"
+    pattern = r"(?:insert|update|set)\s+(?:the\s+)?age\s+(?:of|for)\s+id\s+(\d+)\s*,\s*(\d+)"
+    match = re.search(pattern, user_prompt, re.IGNORECASE)
+    return match
+
+def process_age_update_request(user_prompt):
+    match = is_age_update_request(user_prompt)
+    if match:
+        employee_id = match.group(1).strip()
+        age = match.group(2).strip()
+        return update_employee_age(employee_id, age)
+    return False
+# --- Check if user wants to insert data ---
+def is_insert_request(user_prompt):
+    # More precise pattern that captures just the name after "the name"
+    pattern = r"(?:insert|add)\s+(?:a\s+)?row\s+(?:to|in)\s+employees\s+(?:with\s+the\s+name\s+|name\s+)([^,]+?)\s*,\s*salary\s+(\d+)"
+    match = re.search(pattern, user_prompt, re.IGNORECASE)
+    return match
+
+def process_insert_request(user_prompt):
+    match = is_insert_request(user_prompt)  # This defines the 'match' variable
+    if match:
+        # Clean the name by removing any remaining "the name" text
+        name = match.group(1).replace("the name", "").strip()
+        salary = match.group(2).strip()
+        success = insert_employee_record(name, salary)
+        if success:
+            st.success(f"✅ Successfully added employee: {name} with salary ${salary}")
+            return True
+    return False
+
+
+def delete_employee_by_id(employee_id):
+    try:
+        delete_response = supabase.from_("employees").delete().eq("id", int(employee_id)).execute()
+        
+        if len(delete_response.data) > 0:
+            st.success(f"✅ Successfully deleted employee with ID {employee_id}")
+            return True
+        else:
+            st.error(f"❌ No employee found with ID {employee_id}")
+            return False
+    except Exception as e:
+        st.error(f"Error deleting employee: {str(e)}")
+        return False
+    
+def is_delete_request(user_prompt):
+    # Pattern for "delete the row with id 3"
+    pattern = r"delete\s+(?:the\s+)?row\s+(?:with\s+)?id\s+(\d+)"
+    match = re.search(pattern, user_prompt, re.IGNORECASE)
+    return match
 # --- Gemini natural language query response ---
 def get_natural_language_response(user_prompt, table_data):
+    # First check if this is an insert request
+    if is_insert_request(user_prompt):
+        process_insert_request(user_prompt)
+        return "Employee record has been inserted successfully."
+    
     model = genai.GenerativeModel("gemini-1.5-flash")
     
     system_prompt = f"""
@@ -135,7 +227,7 @@ For example, if the receipt shows "$15.99", return "15.99".
                 st.error("Failed to download image.")
         else:
             st.error("Could not generate public URL.")
-# Add button to update the refund request if we have an extracted amount
+
 # Add button to update the refund request if we have an extracted amount
 if 'extracted_amount' in st.session_state and 'image_url' in st.session_state:
     if st.button("📤 Upload Amount to Refund Request"):
@@ -152,17 +244,38 @@ if 'extracted_amount' in st.session_state and 'image_url' in st.session_state:
 # --- Natural Language Query ---
 st.header("💬 Ask Your Database")
 
-user_prompt = st.text_input("Type your question (e.g., 'Who are our highest paid employees?')")
+user_prompt = st.text_input("Type your question (e.g., 'Who are our highest paid employees?' or 'insert a row in employees with the name John doe, salary 30000')")
 
 if st.button("Get Answer"):
     if user_prompt:
-        with st.spinner("Fetching data and generating response..."):
-            # First fetch all table data
-            table_data = fetch_all_table_data()
+        with st.spinner("Processing your request..."):
+
+            delete_match = is_delete_request(user_prompt)
+            if delete_match:
+                employee_id = delete_match.group(1).strip()
+                if delete_employee_by_id(employee_id):
+                    st.rerun()
+                else:
+                    st.error("Failed to delete employee")
+            # First check for age updates
+            age_match = is_age_update_request(user_prompt)
+            if age_match:
+                employee_id = age_match.group(1).strip()
+                age = age_match.group(2).strip()
+                if update_employee_age(employee_id, age):
+                    st.rerun()
             
-            if table_data:
-                # Get natural language response from Gemini
-                response = get_natural_language_response(user_prompt, table_data)
+            # Then check for employee inserts
+            else:
+                insert_match = is_insert_request(user_prompt)  # Renamed to avoid confusion
+                if insert_match:
+                    if process_insert_request(user_prompt):
+                        st.rerun()
                 
-                st.subheader("🤖 AI Response")
-                st.markdown(response)
+                # Finally handle normal queries
+                else:
+                    table_data = fetch_all_table_data()
+                    if table_data:
+                        response = get_natural_language_response(user_prompt, table_data)
+                        st.subheader("🤖 AI Response")
+                        st.markdown(response)
