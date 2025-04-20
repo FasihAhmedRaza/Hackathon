@@ -18,3 +18,20 @@ This project is a Streamlit-based web application that integrates AI-powered too
 ### 3. Natural Language Query
 - Query the database using natural language.
 - Get AI-generated responses based on the data in the `employees` and `refund_requests` tables.
+
+
+## Installation
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/your-repo-name.git
+   cd your-repo-name
+
+# Install Dependencies
+   pip install -r requirements.txt
+
+
+# Configuration
+SUPABASE_URL = "your-supabase-url"
+SUPABASE_KEY = "your-supabase-key"
+GOOGLE_API_KEY = "your-google-api-key"   
