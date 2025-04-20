@@ -1,0 +1,11 @@
+streamlit
+supabase
+Pillow
+requests
+google-generativeai
+pandas
+torch
+transformers
+pydub
+scipy
+numpy
